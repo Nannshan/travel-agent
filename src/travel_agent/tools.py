@@ -135,7 +135,7 @@ async def get_weather(city: str, date: str, days: int):
 # 示例运行代码
 async def main():
     city = "威海"
-    start_date = "2025-02-06"  # 示例起始日期
+    start_date = "2025-03-05"  # 示例起始日期
     days = 2
     weather_data = await get_weather(city, start_date, days)
     for date_str, weather in weather_data.items():
