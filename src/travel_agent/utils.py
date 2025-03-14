@@ -1,36 +1,5 @@
 from typing import Optional, List, Dict, Any
-
-from langchain.chat_models import init_chat_model
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AnyMessage
-from langchain_core.runnables import RunnableConfig
 from openai import OpenAI
-
-from src.travel_agent.configuration import Configuration
-
-
-def get_message_text(msg: AnyMessage) -> str:
-    """Get the text content of a message."""
-    content = msg.content
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, dict):
-        return content.get("text", "")
-    else:
-        txts = [c if isinstance(c, str) else (c.get("text") or "") for c in content]
-        return "".join(txts).strip()
-
-
-def init_model(config: Optional[RunnableConfig] = None) -> BaseChatModel:
-    """Initialize the configured chat model."""
-    configuration = Configuration.from_runnable_config(config)
-    fully_specified_name = configuration.model
-    if "/" in fully_specified_name:
-        provider, model = fully_specified_name.split("/", maxsplit=1)
-    else:
-        provider = None
-        model = fully_specified_name
-    return init_chat_model(model, model_provider=provider)
 
 
 def is_last_feedback_satisfied(feedback: Optional[List[str]]) -> bool:
@@ -39,7 +8,7 @@ def is_last_feedback_satisfied(feedback: Optional[List[str]]) -> bool:
             return False
         # 获取最后一条反馈
         last_feedback = feedback[-1]
-        # 判断最后一条反馈是否包含“满意”
+        # 判断最后一条反馈是否包含"满意"
         return "满意" in last_feedback
 
 
@@ -47,12 +16,29 @@ def use_deepseek(msgs: List[Dict[str, Any]]) -> str:
     client = OpenAI(api_key="sk-6bf57ceb23e9467cb5e77f81b57b8c84", base_url="https://api.deepseek.com")
     response = client.chat.completions.create(
         model="deepseek-chat",
-        temperature=1.3,
         messages=msgs,
-        stream=False
+        # response_format={
+        #     'type': 'json_object'
+        # },
+        frequency_penalty = -0.8,
+        max_tokens = 8000,
+        temperature=1.3,
+        stream=True
     )
-    print(response.choices[0].message.content)
-    return response.choices[0].message.content
+    
+    # 处理流式响应
+    full_response = ""
+    for chunk in response:
+        if chunk.choices[0].delta.content is not None:
+            content = chunk.choices[0].delta.content
+            full_response += content
+            # 使用 data: 前缀输出，符合 SSE 格式
+            # print(f"data: {content}")
+            yield content
+    
+    # 输出结束标记
+    print("data: [DONE]")
+    return full_response
 
 if __name__ == "__main__":
     messages = [
@@ -60,4 +46,6 @@ if __name__ == "__main__":
         {"role": "assistant", "content": "请问你想去哪旅行？什么时间？有什么旅行偏好吗？"},
         {"role": "user", "content": "你好"},
     ]
-    use_deepseek(messages)
+    # 测试流式响应
+    for response_chunk in use_deepseek(messages):
+        print(response_chunk, end="", flush=True)
