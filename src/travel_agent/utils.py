@@ -1,11 +1,15 @@
+import asyncio
 from typing import List, Dict, Any
 
 import aiohttp
 import datetime
+
+from openai.types.chat import ChatCompletion
 from xpinyin import Pinyin
 from langchain_core.messages import BaseMessage, AIMessage
 from openai import OpenAI
 
+from src.travel_agent.prompts import SYSTEM_MESSAGE
 
 # 天气api
 WEATHER_API_KEY = "63c6f9bef927de53784494ec41141c7f"
@@ -87,28 +91,27 @@ def use_deepseek(msgs: List[Dict[str, Any]]) -> str:
     response = client.chat.completions.create(
         model="deepseek-chat",
         messages=msgs,
-        # response_format={
-        #     'type': 'json_object'
-        # },
-        frequency_penalty = -0.8,
-        max_tokens = 8000,
+        response_format={
+            'type': 'json_object'
+        },
         temperature=1.3,
-        stream=True
+        stream = False
     )
+    return response.choices[0].message.content
     
-    # 处理流式响应
-    full_response = ""
-    for chunk in response:
-        if chunk.choices[0].delta.content is not None:
-            content = chunk.choices[0].delta.content
-            full_response += content
-            # 使用 data: 前缀输出，符合 SSE 格式
-            # print(f"data: {content}")
-            yield content
-    
-    # 输出结束标记
-    print("data: [DONE]")
-    return full_response
+    # # 处理流式响应
+    # full_response = ""
+    # for chunk in response:
+    #     if chunk.choices[0].delta.content is not None:
+    #         content = chunk.choices[0].delta.content
+    #         full_response += content
+    #         # 使用 data: 前缀输出，符合 SSE 格式
+    #         # print(f"data: {content}")
+    #         yield content
+    #
+    # # 输出结束标记
+    # print("data: [DONE]")
+    # return full_response
 
 # 示例运行代码
 async def main():
@@ -125,3 +128,8 @@ async def main():
 if __name__ == "__main__":
     print("---------------------")
     # asyncio.run(main())
+    messages = [
+        SYSTEM_MESSAGE,
+        {"role": "user", "content": "我想去北京"},
+    ]
+    print(use_deepseek(messages))

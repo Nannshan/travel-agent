@@ -8,7 +8,7 @@ from langgraph.graph import StateGraph
 from langgraph.types import interrupt
 
 from src.travel_agent.configuration import Configuration
-from src.travel_agent.prompts import PRE_MESSAGE_PROMPT, USER_PLAN_PROMPT, HANDLE_USER_INPUT
+from src.travel_agent.prompts import PRE_MESSAGE_PROMPT, USER_PLAN_PROMPT, SYSTEM_MESSAGE
 from src.travel_agent.state import InputState, OutputState, State
 from src.travel_agent.tools import  rag_retrieval, extract_info, ready_to_generate
 from src.travel_agent.utils import use_deepseek, is_satisfied, get_weather, get_current_date
@@ -22,7 +22,7 @@ async def handle_input(state: State) -> State:
         # 更新 current_date
         state.current_date = date
         sres = f"当前日期：{state.current_date}, 对话id：{state.chat_id}"
-        messages = [HANDLE_USER_INPUT]
+        messages = [SYSTEM_MESSAGE]
         messages.append(SystemMessage(content=sres))
         messages.append(HumanMessage(content=state.initial_input))
     else:
@@ -46,7 +46,7 @@ def route_after_handle_input(state: State) -> Literal["generate", "user_input"]:
 def user_input(state: State) -> State:
     res = interrupt(state.messages[-1].content)
     state.messages.append(HumanMessage(content=res))
-    sres = "当收集到所有信息时，以JSON格式统计收集到的信息，因为要用于下一步处理，所以最后不要输出对用户的消息，仅仅输出JSON。"
+    sres = "最后输出的消息用于调试，当收集到所有信息时，输出含有city,preferences,start_date,days的JSON，不要输出MarkDown格式。"
     state.messages.append(SystemMessage(content=sres))
 
     return state
@@ -163,7 +163,9 @@ workflow = StateGraph(
     State, input=InputState, output=OutputState, config_schema=Configuration
 )
 
+DEEPSEEK_API_KEY="sk-6bf57ceb23e9467cb5e77f81b57b8c84"
 llm = ChatDeepSeek(
+    api_key=DEEPSEEK_API_KEY,
     model="deepseek-chat",
     timeout=None,
     temperature=1.3
