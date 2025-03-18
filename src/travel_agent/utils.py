@@ -4,7 +4,6 @@ from typing import List, Dict, Any
 import aiohttp
 import datetime
 
-from openai.types.chat import ChatCompletion
 from xpinyin import Pinyin
 from langchain_core.messages import BaseMessage, AIMessage
 from openai import OpenAI
@@ -35,6 +34,7 @@ async def get_weather(city: str, date: str, days: int):
     """
     获取从指定日期开始连续 days 天的天气情况，
     返回结果为 { "YYYY-MM-DD": 天气情况 } 字典。
+    天气情况包含：天气描述、最低温度、最高温度和平均温度。
     若请求日期超过当前日期起16天，则返回 "超出查询范围"。
     """
     try:
@@ -66,8 +66,10 @@ async def get_weather(city: str, date: str, days: int):
         for day_data in data.get("list", []):
             forecast_date = datetime.date.fromtimestamp(day_data["dt"])
             weather_main = day_data["weather"][0]["description"]
-            temp = day_data["temp"]["day"]
-            forecast_dict[forecast_date] = f"{weather_main} {temp:.1f}°C"
+            temp_min = day_data["temp"]["min"]
+            temp_max = day_data["temp"]["max"]
+            temp_avg = day_data["temp"]["day"]
+            forecast_dict[forecast_date] = f"{weather_main} 最低{temp_min:.1f}°C 最高{temp_max:.1f}°C 平均{temp_avg:.1f}°C"
 
         # 根据用户请求的日期区间组装结果
         result = {}
@@ -86,11 +88,28 @@ async def get_weather(city: str, date: str, days: int):
         return {(start_date + datetime.timedelta(days=i)).strftime("%Y-%m-%d"): "天气数据获取失败"
                 for i in range(days)}
 
-def use_deepseek(msgs: List[Dict[str, Any]]) -> str:
+def use_deepseek(msgs: List[Any]) -> str:
+    # 转换消息格式
+    formatted_messages = []
+    for msg in msgs:
+        if isinstance(msg, dict):
+            formatted_messages.append(msg)
+        else:
+            # 处理 langchain 消息类型
+            role = msg.type
+            if role == "human":
+                role = "user"
+            elif role == "ai":
+                role = "assistant"
+            formatted_messages.append({
+                "role": role,
+                "content": msg.content
+            })
+    
     client = OpenAI(api_key="sk-6bf57ceb23e9467cb5e77f81b57b8c84", base_url="https://api.deepseek.com")
     response = client.chat.completions.create(
         model="deepseek-chat",
-        messages=msgs,
+        messages=formatted_messages,
         response_format={
             'type': 'json_object'
         },
@@ -115,9 +134,9 @@ def use_deepseek(msgs: List[Dict[str, Any]]) -> str:
 
 # 示例运行代码
 async def main():
-    city = "泰安"
-    start_date = "2025-03-14"  # 使用未来日期进行测试
-    days = 3
+    city = "威海"
+    start_date = "2025-03-17"  # 使用未来日期进行测试
+    days = 2
     weather_data = await get_weather(city, start_date, days)
     for date_str, weather in weather_data.items():
         print(f"日期: {date_str} : 天气: {weather}")
@@ -127,9 +146,9 @@ async def main():
 # 运行示例
 if __name__ == "__main__":
     print("---------------------")
-    # asyncio.run(main())
-    messages = [
-        SYSTEM_MESSAGE,
-        {"role": "user", "content": "我想去北京"},
-    ]
-    print(use_deepseek(messages))
+    asyncio.run(main())
+    # messages = [
+    #     SYSTEM_MESSAGE,
+    #     {"role": "user", "content": "我想去北京"},
+    # ]
+    # print(use_deepseek(messages))

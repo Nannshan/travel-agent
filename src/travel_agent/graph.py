@@ -1,14 +1,13 @@
-from typing import Any, Dict, List, Literal, Optional, cast
+from typing import Any, Dict, List, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_deepseek import ChatDeepSeek
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
 from langgraph.types import interrupt
 
 from src.travel_agent.configuration import Configuration
-from src.travel_agent.prompts import PRE_MESSAGE_PROMPT, USER_PLAN_PROMPT, SYSTEM_MESSAGE
+from src.travel_agent.prompts import PRE_MESSAGE_PROMPT, USER_PLAN_PROMPT, SYSTEM_MESSAGE, FEEDBACK_PROMPT
 from src.travel_agent.state import InputState, OutputState, State
 from src.travel_agent.tools import  rag_retrieval, extract_info, ready_to_generate
 from src.travel_agent.utils import use_deepseek, is_satisfied, get_weather, get_current_date
@@ -22,39 +21,27 @@ async def handle_input(state: State) -> State:
         # 更新 current_date
         state.current_date = date
         sres = f"当前日期：{state.current_date}, 对话id：{state.chat_id}"
-        messages = [SYSTEM_MESSAGE]
-        messages.append(SystemMessage(content=sres))
-        messages.append(HumanMessage(content=state.initial_input))
+        messages = [SYSTEM_MESSAGE, SystemMessage(content=sres), HumanMessage(content=state.initial_input)]
     else:
         messages = state.messages
 
     # 调用大模型获取规划条件
-    response = cast(AIMessage, await llm.ainvoke(messages))
-    messages.append(AIMessage(content=response.content))
+    # response = cast(AIMessage, await llm.ainvoke(messages))
+    response = use_deepseek(messages)
+    messages.append(AIMessage(content=response))
 
     state.messages = messages
     return state
-
-# 判断继续获取或者生成规划
-def route_after_handle_input(state: State) -> Literal["generate", "user_input"]:
-    if ready_to_generate(state.messages):
-        return "generate"
-    else:
-        return "user_input"
 
 # 用户输入
 def user_input(state: State) -> State:
     res = interrupt(state.messages[-1].content)
     state.messages.append(HumanMessage(content=res))
-    sres = "最后输出的消息用于调试，当收集到所有信息时，输出含有city,preferences,start_date,days的JSON，不要输出MarkDown格式。"
-    state.messages.append(SystemMessage(content=sres))
 
     return state
 
 # 核心处理节点
-async def generate(
-        state: State, *, config: Optional[RunnableConfig] = None
-) -> State:
+async def generate( state: State )  -> State:
     # 初始化消息列表
     messages = [PRE_MESSAGE_PROMPT]
 
@@ -65,10 +52,9 @@ async def generate(
     state.start_date = res["start_date"]
     state.preferences = res["preferences"]
 
-    configuration = Configuration.from_runnable_config(config)
 
     # 从state获取用户输入参数
-    weather_data = await get_weather(state.city, state.start_date, state.days)
+    weather_data = await get_weather(state.city, state.preferences, state.days)
     state.weather_data = weather_data
 
     # 调用RAG模型获取候选景点数据(根据地点和用户偏好，考虑景点的评分)
@@ -100,49 +86,44 @@ async def generate(
     )
     messages.append(HumanMessage(content=prompt))
     # 调用大模型生成旅行规划
-    response = cast(AIMessage, await llm.ainvoke(messages))
-    # response = use_deepseek(messages)
-    messages.append(AIMessage(content=response.content))
+    # response = cast(AIMessage, await llm.ainvoke(messages))
+    response = use_deepseek(messages)
+    messages.append(AIMessage(content=response))
 
     # 保存当天规划及对应的候选景点
     state.messages = messages
-    state.plans =  response.content
+    state.plans =  response
 
     return state
 
 
-def handle_feedback(state: State, *, config: Optional[RunnableConfig] = None) -> State:
+async def handle_feedback(state: State) -> State:
     """
     根据用户反馈调整旅游推荐规划。
     """
-    # 初始化消息列表，若 state 中已有对话记录则复用，否则初始化一个新的列表
-    # messages: List[Dict[str, Any]] = getattr(state, "messages", [])
+    # 初始化消息列表
     messages = state.messages
 
-    # 记录用户反馈
-    messages.append({"role": "user", "content": f"用户反馈：{state.feedback}"})
+    # 从state获取用户输入参数
+    weather_data = await get_weather(state.city, state.start_date, state.days)
+    state.weather_data = weather_data
 
     # 获取候选景点列表
     # candidate_pool: List[Dict[str, Any]] = getattr(state, "candidate_pool", [])
-    candidate_pool = state.candidate_pool
 
-    # 构造大模型调用的提示词，要求生成更新后的旅行规划
-    prompt = f"""请根据以下反馈信息和候选景点状态为我调整旅行规划：
-- 用户反馈：{state.feedback}"""
-
-    messages.append({"role": "user", "content": prompt})
     # 调用大模型（假设 use_deepseek 为调用大模型的函数）
     response = use_deepseek(messages)
-    messages.append({"role": "assistant", "content": response})
+    messages.append(AIMessage(content=response))
 
     # 更新 state 中的候选景点和消息记录
-    state.candidate_pool = candidate_pool
     state.messages = messages
-    state.updated_plan = response
+    state.plans = response
 
     return state
 
 def human_assistance(state: State) -> State:
+
+    state.messages.append(FEEDBACK_PROMPT)
     """咨询用户进行下一步."""
     res = interrupt("对当前旅程满意吗？如果有其他想法，请随时与我沟通。")
     state.messages.append(AIMessage(content="对当前旅程满意吗？如果有其他想法，请随时与我沟通。"))
@@ -158,6 +139,13 @@ def finalize(state: State) -> OutputState:
 def route_after_human_assistance(state: State) -> Literal["handle_feedback", "finalize"]:
     return "finalize" if is_satisfied(state.messages) else "handle_feedback"
 
+# 判断继续获取或者生成规划
+def route_after_handle_input(state: State) -> Literal["generate", "user_input"]:
+    if ready_to_generate(state.messages):
+        return "generate"
+    else:
+        return "user_input"
+
 # 构建工作流
 workflow = StateGraph(
     State, input=InputState, output=OutputState, config_schema=Configuration
@@ -167,7 +155,6 @@ DEEPSEEK_API_KEY="sk-6bf57ceb23e9467cb5e77f81b57b8c84"
 llm = ChatDeepSeek(
     api_key=DEEPSEEK_API_KEY,
     model="deepseek-chat",
-    timeout=None,
     temperature=1.3
 )
 
@@ -183,17 +170,16 @@ workflow.add_node(human_assistance)
 workflow.add_edge("__start__", "handle_input")
 workflow.add_edge("user_input", "handle_input")
 workflow.add_edge("generate", "human_assistance")
-workflow.add_edge("human_assistance", "__end__")
-# workflow.add_edge("handle_feedback", "human_assistance")
-# workflow.add_edge("finalize", "__end__")
+workflow.add_edge("handle_feedback", "human_assistance")
+workflow.add_edge("finalize", "__end__")
 workflow.add_conditional_edges(
     "handle_input",
     route_after_handle_input,
 )
-# workflow.add_conditional_edges(
-#     "human_assistance",
-#     route_after_human_assistance,
-# )
+workflow.add_conditional_edges(
+    "human_assistance",
+    route_after_human_assistance,
+)
 memory = MemorySaver()
 # 初始化
 graph = workflow.compile(checkpointer=memory)
