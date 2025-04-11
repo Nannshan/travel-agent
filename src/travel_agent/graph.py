@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal
+from typing import Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_deepseek import ChatDeepSeek
@@ -41,7 +41,7 @@ def user_input(state: State) -> State:
     return state
 
 # 核心处理节点
-async def generate( state: State )  -> State:
+async def generate(state: State) -> State:
     # 初始化消息列表
     messages = [PRE_MESSAGE_PROMPT]
 
@@ -52,28 +52,13 @@ async def generate( state: State )  -> State:
     state.start_date = res["start_date"]
     state.preferences = res["preferences"]
 
-
     # 从state获取用户输入参数
-    weather_data = await get_weather(state.city, state.preferences, state.days)
+    weather_data = await get_weather(state.city, state.start_date, state.days)
     state.weather_data = weather_data
 
     # 调用RAG模型获取候选景点数据(根据地点和用户偏好，考虑景点的评分)
     # 根据天数决定景点数量，一天选三个
-    candidate_pool = await rag_retrieval(state.city, state.preferences, state.days)
-
-    # 获取候选景点数据, 优先从 state 中获取 candidate_pool，否则构造一个示例列表
-    candidate_pool: List[Dict[str, Any]] = getattr(state, "candidate_pool", [])
-    if not candidate_pool:
-        candidate_pool = [
-            {"name": "故宫博物院",  "category": "历史"},
-            {"name": "颐和园",  "category": "自然"},
-            {"name": "天坛公园",  "category": "文化"},
-            {"name": "798艺术区",  "category": "艺术"},
-            {"name": "王府井大街",  "category": "购物"},
-            {"name": "南锣鼓巷",  "category": "文化"},
-            {"name": "什刹海",  "category": "休闲"},
-            {"name": "北京动物园", "category": "家庭游"},
-        ]
+    candidate_pool = rag_retrieval(state.city, state.preferences, state.days)
     state.candidate_pool = candidate_pool
 
     # 生成旅行规划
@@ -92,42 +77,43 @@ async def generate( state: State )  -> State:
 
     # 保存当天规划及对应的候选景点
     state.messages = messages
-    state.plans =  response
+    state.plans = response
 
     return state
 
 
-async def handle_feedback(state: State) -> State:
+def handle_feedback(state: State) -> State:
     """
     根据用户反馈调整旅游推荐规划。
     """
-    # 初始化消息列表
-    messages = state.messages
-
-    # 从state获取用户输入参数
-    weather_data = await get_weather(state.city, state.start_date, state.days)
-    state.weather_data = weather_data
 
     # 获取候选景点列表
     # candidate_pool: List[Dict[str, Any]] = getattr(state, "candidate_pool", [])
 
     # 调用大模型（假设 use_deepseek 为调用大模型的函数）
-    response = use_deepseek(messages)
-    messages.append(AIMessage(content=response))
+    response = use_deepseek(state.messages)
+    state.messages.append(AIMessage(content=response))
 
-    # 更新 state 中的候选景点和消息记录
-    state.messages = messages
+    # 更新
     state.plans = response
 
     return state
 
 def human_assistance(state: State) -> State:
-
-    state.messages.append(FEEDBACK_PROMPT)
     """咨询用户进行下一步."""
+    # 创建新的消息列表，只包含反馈相关的消息
+    state.messages = []
+    # 获取用户反馈
     res = interrupt("对当前旅程满意吗？如果有其他想法，请随时与我沟通。")
-    state.messages.append(AIMessage(content="对当前旅程满意吗？如果有其他想法，请随时与我沟通。"))
-    state.messages.append(HumanMessage(content=res))
+    state.feed_back.append(res)
+
+    feedback_messages = [SystemMessage(content=FEEDBACK_PROMPT["content"].format(
+        feed_back=state.feed_back,
+        pre_plan=state.plans
+    )), AIMessage(content="对当前旅程满意吗？如果有其他想法，请随时与我沟通。"), HumanMessage(content=res)]
+
+    # 更新state中的消息
+    state.messages = feedback_messages
     return state
 
 def finalize(state: State) -> OutputState:

@@ -1,3 +1,7 @@
 aiohttp==3.11.12
+chromadb==0.6.3
+google_auth==2.38.0
 react_agent==0.0.1
+sentence_transformers==3.4.1
+torch==2.5.1+cu121
 xpinyin==0.7.6

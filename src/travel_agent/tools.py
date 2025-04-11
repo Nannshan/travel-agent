@@ -6,7 +6,24 @@ from pathlib import Path
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 import pandas as pd
+import torch
+from sentence_transformers import SentenceTransformer
 
+
+def get_embedding_function():
+    """获取embedding函数，优先使用GPU"""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"使用设备: {device}")
+    
+
+    model = SentenceTransformer("shibing624/text2vec-base-chinese-sentence")
+    model.to(device)
+    
+    # 创建embedding函数
+    return embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name="shibing624/text2vec-base-chinese-sentence",
+        device=device
+    )
 
 def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
     """使用Chroma进行景点检索
@@ -14,7 +31,7 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
     Args:
         city: 城市名称
         preferences: 偏好列表，如["自然", "人文"]
-        days: 旅行天数，返回景点数量为天数的4倍
+        days: 旅行天数
         
     Returns:
         List[dict]: 景点信息列表
@@ -48,24 +65,25 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
         chroma_db_path = data_dir / "chroma_db"
         print(f"ChromaDB路径: {chroma_db_path}")
         
-        chroma_client = chromadb.Client(Settings(
-            persist_directory=str(chroma_db_path),
-            anonymized_telemetry=False
-        ))
+        # 确保ChromaDB目录存在
+        chroma_db_path.mkdir(parents=True, exist_ok=True)
         
-        # 使用sentence-transformers进行向量化
-        embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
+        chroma_client = chromadb.PersistentClient(path=str(chroma_db_path))
+        
+        # 使用shibing624/text2vec-base-chinese-sentence
+        embedding_function = get_embedding_function()
         
         # 创建或获取collection
         collection_name = "travel_scenes"
         
-        # 检查collection是否存在
-        collections = chroma_client.list_collections()
-        collection_exists = any(col.name == collection_name for col in collections)
-        
-        if not collection_exists:
+        try:
+            # 尝试获取已存在的collection
+            collection = chroma_client.get_collection(
+                name=collection_name,
+                embedding_function=embedding_function
+            )
+            print("成功获取已存在的collection")
+        except chromadb.errors.InvalidCollectionException:
             print("正在创建新的向量数据库...")
             # 如果collection不存在，创建新的collection
             collection = chroma_client.create_collection(
@@ -118,14 +136,14 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
                     # 构建文档内容
                     content = doc['page_content']
                     
-                    # 构建元数据
+                    # 构建元数据（将列表转换为字符串）
                     metadata = {
                         'name': doc['metadata'].get('name', ''),
                         'city': doc['metadata'].get('city', ''),
                         'address': doc['metadata'].get('address', ''),
                         'score': doc['metadata'].get('score', ''),
-                        'tags': tags,
-                        'features': features
+                        'tags': ','.join(tags),  # 将列表转换为逗号分隔的字符串
+                        'features': ','.join(features)  # 将列表转换为逗号分隔的字符串
                     }
                     
                     texts.append(content)
@@ -133,61 +151,80 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
                     ids.append(f"doc_{i}")
                 
                 print(f"正在添加{len(documents)}条数据到向量数据库...")
-                # 添加到Chroma，使用批量添加以提高效率
-                collection.add(
-                    documents=texts,
-                    metadatas=metadatas,
-                    ids=ids
-                )
+                # 分批添加数据到Chroma
+                batch_size = 1000  # 设置每批数据的大小
+                for i in range(0, len(documents), batch_size):
+                    batch_end = min(i + batch_size, len(documents))
+                    print(f"正在处理第{i+1}到{batch_end}条数据...")
+                    
+                    # 获取当前批次的数据
+                    batch_texts = texts[i:batch_end]
+                    batch_metadatas = metadatas[i:batch_end]
+                    batch_ids = ids[i:batch_end]
+                    
+                    # 添加到Chroma
+                    collection.add(
+                        documents=batch_texts,
+                        metadatas=batch_metadatas,
+                        ids=batch_ids
+                    )
                 print("向量数据库创建完成！")
                 
             except Exception as e:
                 print(f"CSV数据处理错误: {str(e)}")
                 raise
-        else:
-            print("获取已存在的collection...")
-            collection = chroma_client.get_collection(
-                name=collection_name,
-                embedding_function=embedding_function
-            )
-            print("成功获取collection")
         
         # 构建查询
         preferences_text = "、".join(preferences)
-        query_text = f"在{city}的{preferences_text}类旅游景点"
+        query_text = f"在{city}的特点为{preferences_text}类的旅游景点"
         print(f"查询文本: {query_text}")
         
         # 计算需要返回的景点数量
         n_results = days * 3
         
-        # 执行检索，添加相似度阈值
+        # 执行检索，降低相似度阈值
         results = collection.query(
             query_texts=[query_text],
-            n_results=n_results,
+            n_results=n_results * 3,  # 增加返回数量，以便后续过滤
             where={"city": city} if city else None,  # 添加城市过滤
-            where_document={"$contains": preferences_text} if preferences else None,  # 添加偏好过滤
             include=["documents", "metadatas", "distances"]  # 包含相似度分数
         )
+        
+        print(f"查询到 {len(results['documents'][0])} 个结果")
         
         # 处理结果
         scenes = []
         for i in range(len(results['documents'][0])):
-            # 只添加相似度大于0.7的结果
-            if results['distances'][0][i] < 0.7:
+            if results['distances'][0][i] < 0.4:
                 metadata = results['metadatas'][0][i]
+                try:
+                    score = float(metadata.get('score', 0))
+                except (ValueError, TypeError):
+                    score = 0
+                    
                 scene = {
                     "name": metadata.get('name', '未知景点'),
-                    "description": results['documents'][0][i],
-                    "address": metadata.get('address', ''),
-                    "score": metadata.get('score', ''),
-                    "tags": metadata.get('tags', []),
-                    "features": metadata.get('features', []),
-                    "similarity": 1 - results['distances'][0][i]  # 转换为相似度分数
+                    "score": score,
+                    "tags": metadata.get('tags', '').split(',')  # 将字符串转回列表
                 }
                 scenes.append(scene)
         
-        # 按相似度排序
-        scenes.sort(key=lambda x: x['similarity'], reverse=True)
+        print(f"过滤后剩余 {len(scenes)} 个结果")
+        
+        # 按评分从高到低排序
+        scenes.sort(key=lambda x: x['score'], reverse=True)
+        
+        # 只返回需要的数量（每天3个景点）
+        max_places = days * 3
+        scenes = scenes[:max_places]
+        
+        print("\n最终推荐景点：")
+        for scene in scenes:
+            print(f"景点: {scene['name']}")
+            print(f"评分: {scene['score']}")
+            print(f"标签: {', '.join(scene['tags'])}")
+            print("-------------------")
+        
         return scenes
         
     except Exception as e:
@@ -236,4 +273,4 @@ def extract_info(messages: List[BaseMessage]) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     print("----------------------")
-    print(rag_retrieval("北京",["自然"],1))
+    print(rag_retrieval("济南",["自然"],2))

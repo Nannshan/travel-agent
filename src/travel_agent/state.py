@@ -54,6 +54,10 @@ class State(InputState):
         default="",
         metadata={"description": "当前行程草案"}
     )
+    feed_back: List[str] = field(
+        default_factory=list,
+        metadata={"description": "用户反馈历史"}
+    )
 
 @dataclass(kw_only=True)
 class OutputState:
