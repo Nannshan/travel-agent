@@ -133,20 +133,20 @@ def use_deepseek(msgs: List[Any]) -> str:
     # return full_response
 
 # 示例运行代码
-async def main():
-    city = "威海"
-    start_date = "2025-03-17"  # 使用未来日期进行测试
-    days = 2
-    weather_data = await get_weather(city, start_date, days)
-    for date_str, weather in weather_data.items():
-        print(f"日期: {date_str} : 天气: {weather}")
+# async def main():
+#     city = "威海"
+#     start_date = "2025-03-17"  # 使用未来日期进行测试
+#     days = 2
+#     weather_data = await get_weather(city, start_date, days)
+#     for date_str, weather in weather_data.items():
+#         print(f"日期: {date_str} : 天气: {weather}")
 
 
 
 # 运行示例
 if __name__ == "__main__":
     print("---------------------")
-    asyncio.run(main())
+    # asyncio.run(main())
     # messages = [
     #     SYSTEM_MESSAGE,
     #     {"role": "user", "content": "我想去北京"},

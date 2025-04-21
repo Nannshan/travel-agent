@@ -26,13 +26,17 @@ TRAVEL_PLAN_EXAMPLE = {
             "itinerary": {
                 "morning": {
                     "attraction": "",
+                    "arrangement": "",
                     "recommendation_reason": "",
-                    "arrangement": ""
+                    "preparation": "",
+                    "travel_guide": ""
                 },
                 "afternoon": {
                     "attraction": "",
+                    "arrangement": "",
                     "recommendation_reason": "",
-                    "arrangement": ""
+                    "preparation": "",
+                    "travel_guide": ""
                 }
             },
             "path":"",
@@ -47,13 +51,17 @@ TRAVEL_PLAN_EXAMPLE = {
             "itinerary": {
                 "morning": {
                     "attraction": "",
+                    "arrangement": "",
                     "recommendation_reason": "",
-                    "arrangement": ""
+                    "preparation": "",
+                    "travel_guide": ""
                 },
                 "afternoon": {
                     "attraction": "",
+                    "arrangement": "",
                     "recommendation_reason": "",
-                    "arrangement": ""
+                    "preparation": "",
+                    "travel_guide": ""
                 }
             },
             "path": "",
@@ -65,9 +73,8 @@ TRAVEL_PLAN_EXAMPLE = {
 PRE_MESSAGE_PROMPT = {
         "role": "system",
         "content": (
-        "你是一个热心的旅行计划师，擅长根据天气情况、兴趣爱好推荐旅游景点。请使用中文。"
-        "请根据提供的城市、开始时间、旅行天数、旅行偏好等信息推荐合理的旅行规划, "
-        "字数要求：主题subject7字左右,不得使用xxxx日游，每个景点recommendation_reason250字左右，行程安排arrangement150字左右, 总结summary120字左右。"
+        "你是一个热心的旅行计划师，擅长根据天气情况、兴趣爱好推荐旅游景点。请使用中文。满足字数要求"
+        "请根据提供的城市、开始时间、旅行天数、旅行偏好以及景点间的距离等信息推荐合理的旅行规划,一天内景点不能隔得太远。"
         f"""输出JSON格式参考,其中type为generate,res为对用户的回应，不得为空：{TRAVEL_PLAN_EXAMPLE}。"""
     ),
 }
@@ -78,8 +85,8 @@ USER_PLAN_PROMPT = """
     - 天气状况：{weather_data}
     - 用户偏好：{preferences}
     - 候选景点信息：{candidate_pool}
-    请整合以上信息，从候选景点选择最大化满足偏好的景点，生成一个连贯且内容丰富的旅行规划，包括各景点的推荐理由及合理的行程安排，景点不要重复选择，要求描述清晰且具有吸引力。
-     "字数要求：主题subject7字左右,不得使用xxxx日游，每个景点recommendation_reason250字左右，行程安排arrangement150字左右, 总结summary120字左右。"""
+    请整合以上信息，从候选景点选择最大化满足偏好的景点，生成一个连贯且内容丰富的旅行规划，包括各景点的推荐理由及合理的行程安排，景点不要重复选择，要求描述清晰且具有吸引力。一天内景点不能隔得太远。满足字数要求
+     "使用丰富且具有吸引力的描述，字数及内容要求：主题subject7字左右,不得使用xxxx日游,行程安排arrangement150字,推荐原因recommendation_reason250字,前期准备preparation（包括证件衣物以及雨伞等）,游玩攻略travel_guide200字,总结summary120字。"""
 
 FEEDBACK_PROMPT = {
     "role": "system",

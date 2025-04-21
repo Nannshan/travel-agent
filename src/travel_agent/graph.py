@@ -141,7 +141,7 @@ DEEPSEEK_API_KEY="sk-6bf57ceb23e9467cb5e77f81b57b8c84"
 llm = ChatDeepSeek(
     api_key=DEEPSEEK_API_KEY,
     model="deepseek-chat",
-    temperature=1.3
+    temperature=1.5
 )
 
 # 添加节点
