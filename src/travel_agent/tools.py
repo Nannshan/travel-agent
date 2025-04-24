@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple, Optional
 import json
 from langchain_core.messages import BaseMessage
 import chromadb
@@ -8,6 +8,7 @@ from chromadb.utils import embedding_functions
 import pandas as pd
 import torch
 from sentence_transformers import SentenceTransformer
+import requests
 
 
 def get_embedding_function():
@@ -24,6 +25,54 @@ def get_embedding_function():
         model_name="shibing624/text2vec-base-chinese-sentence",
         device=device
     )
+
+def get_location_from_amap(place_name: str, city: str) -> Tuple[float, float]:
+    """
+    使用高德地图地理编码API获取地点的经纬度
+    
+    Args:
+        place_name: 地点名称
+        city: 城市名称
+        
+    Returns:
+        Tuple[float, float]: (经度, 纬度)
+    """
+    try:
+        api_key = "ad5cd6793242c7b0edbf55b06714fc55"  
+        
+        # 构建请求URL
+        url = "https://restapi.amap.com/v3/geocode/geo"
+        
+        # 构建完整的地址
+        full_address = f"{city}市{place_name}"
+        
+        params = {
+            "key": api_key,
+            "address": full_address,
+            "city": city,
+            "output": "json",
+            "extensions": "all"  # 返回更详细的信息
+        }
+        
+        # 发送请求
+        response = requests.get(url, params=params)
+        data = response.json()
+        
+        # 检查响应状态
+        if data["status"] == "1" and data["geocodes"]:
+            # 获取第一个结果的位置信息
+            geocode = data["geocodes"][0]
+            location = geocode["location"]
+            longitude, latitude = map(float, location.split(","))
+            print(f"成功获取 {place_name} 的经纬度: {longitude}, {latitude}")
+            return longitude, latitude
+        else:
+            print(f"未找到地点 {place_name} 的经纬度信息，API返回: {data}")
+            return 0.0, 0.0
+            
+    except Exception as e:
+        print(f"获取经纬度时发生错误: {str(e)}")
+        return 0.0, 0.0
 
 def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
     """使用Chroma进行景点检索
@@ -185,7 +234,7 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
         # 执行检索，降低相似度阈值
         results = collection.query(
             query_texts=[query_text],
-            n_results=n_results * 3,  # 增加返回数量，以便后续过滤
+            n_results=n_results * 4,  # 增加返回数量，以便后续过滤
             where={"city": city} if city else None,  # 添加城市过滤
             include=["documents", "metadatas", "distances"]  # 包含相似度分数
         )
@@ -202,10 +251,18 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
                 except (ValueError, TypeError):
                     score = 0
                     
+                # 获取景点名称
+                place_name = metadata.get('name', '未知景点')
+                
+                # 获取经纬度
+                longitude, latitude = get_location_from_amap(place_name, city)
+                    
                 scene = {
-                    "name": metadata.get('name', '未知景点'),
+                    "name": place_name,
                     "score": score,
-                    "tags": metadata.get('tags', '').split(',')  # 将字符串转回列表
+                    "tags": metadata.get('tags', '').split(','),  # 将字符串转回列表
+                    "longitude": longitude,
+                    "latitude": latitude
                 }
                 scenes.append(scene)
         
@@ -214,8 +271,8 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
         # 按评分从高到低排序
         scenes.sort(key=lambda x: x['score'], reverse=True)
         
-        # 只返回需要的数量（每天3个景点）
-        max_places = days * 3
+        # 只返回需要的数量（每天4个景点）
+        max_places = days * 4
         scenes = scenes[:max_places]
         
         print("\n最终推荐景点：")
@@ -223,6 +280,7 @@ def rag_retrieval(city: str, preferences: List[str], days: int) -> List[dict]:
             print(f"景点: {scene['name']}")
             print(f"评分: {scene['score']}")
             print(f"标签: {', '.join(scene['tags'])}")
+            print(f"位置: 经度 {scene['longitude']}, 纬度 {scene['latitude']}")
             print("-------------------")
         
         return scenes
@@ -273,4 +331,4 @@ def extract_info(messages: List[BaseMessage]) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     print("----------------------")
-    print(rag_retrieval("济南",["自然"],2))
+    print(rag_retrieval("济南",["自然"],1))
